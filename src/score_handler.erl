@@ -8,13 +8,15 @@
 -behaviour(gen_event).
 
 %% API
--export([subscribe/2]).
+-export([subscribe/2, add_score/2]).
 
 %% gen_event callbacks
 -export([init/1, terminate/2, code_change/3]).
 -export([handle_event/2, handle_call/2, handle_info/2]).
 
--record(state, {}).
+-record(state, {
+    pool :: scorer:pool()
+}).
 
 %%%===================================================================
 %%% API
@@ -24,10 +26,19 @@
 %% @doc Adds an event handler
 %% @end
 %%--------------------------------------------------------------------
--spec(subscribe(To :: scorer:group(), scorer:pool()) -> 
-    ok | {'EXIT', Reason :: term()} | term()).
-subscribe({_,GenEvent}, Pool) ->
-    gen_event:add_handler(GenEvent, ?MODULE, [Pool]).
+-spec subscribe(To :: scorer:group(), scorer:pool()) -> 
+    ok | {'EXIT', Reason :: term()} | term().
+subscribe({_,EventMgrRef}, Pool) ->
+    gen_event:add_handler(EventMgrRef, ?MODULE, [Pool]).
+
+%%--------------------------------------------------------------------
+%% @doc Adds a score in an specific group
+%% @end
+%%--------------------------------------------------------------------
+-spec add_score(To :: scorer:group(), Points :: float()) -> ok.
+add_score({_,EventMgrRef}, Points) ->
+    gen_event:notify(EventMgrRef, {add_score, self(), Points}).
+
 
 %%%===================================================================
 %%% gen_event callbacks
@@ -43,8 +54,8 @@ subscribe({_,GenEvent}, Pool) ->
     {ok, State :: #state{}} |
     {ok, State :: #state{}, hibernate} |
     {error, Reason :: term()}).
-init([_Pool]) ->
-    {ok, #state{}}.
+init([Pool]) ->
+    {ok, #state{pool = Pool}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -59,6 +70,9 @@ init([_Pool]) ->
     {swap_handler, Args1 :: term(), NewState :: #state{},
         Handler2 :: (atom() | {atom(), Id :: term()}), Args2 :: term()} |
     remove_handler).
+handle_event({add_score, To, Points}, State) ->
+    score_pool:add_score(State#state.pool, To, Points),
+    {ok, State};
 handle_event(_Event, State) ->
     {ok, State}.
 

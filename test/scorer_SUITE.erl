@@ -153,6 +153,17 @@ create_combined_pools(_Config) ->
     {ok, P13} = scorer:new_pool([G1, G3]),
     {P12, P13}.
 
+% -------------------------------------------------------------------
+add_points_to_groups(_Config) -> 
+    {ok, G1} = scorer:new_group(),
+    {ok, G2} = scorer:new_group(),
+    {ok, G3} = scorer:new_group(),
+    {ok,  _} = scorer:new_pool([G1, G2]),
+    {ok,  _} = scorer:new_pool([G1, G3]),
+    scorer:add_score([G1, G2, G3], 100.0).
+
+
+
 
 % --------------------------------------------------------------------
 % SPECIFIC HELPER FUNCTIONS ------------------------------------------

@@ -39,12 +39,23 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec start_link() ->
-    {ok, Pid :: pid()} | ignore | {error, Reason :: term()}.
+    {ok, Pid :: pid(), term()} | ignore | {error, Reason :: term()}.
 start_link() ->
     case gen_server:start_link(?MODULE, [], []) of 
         {ok, Pid} -> {ok, Pid, gen_server:call(Pid, tid)};
         Other     -> Other
     end.
+
+%%--------------------------------------------------------------------
+%% @doc Adds a score to an specific id.
+%% @end
+%%--------------------------------------------------------------------
+-spec add_score(Pool, To, Points) -> ok when 
+    Pool   :: scorer:pool(),
+    To     :: pid(),
+    Points :: float().
+add_score({_,ServerRef,_}, To, Points) ->
+    gen_server:cast(ServerRef, {add_score, To, Points}).
 
 %%--------------------------------------------------------------------
 %% @doc Returns the top N of an score pool in a format {Id, Score}.
@@ -153,8 +164,14 @@ handle_call(Request, _From, _State) ->
     {noreply, NewState :: #state{}} |
     {noreply, NewState :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: #state{}}).
-handle_cast(_Request, State) ->
-    {noreply, State}.
+
+handle_cast({add_score, To, Score}, State) ->
+
+    io:format("Adding ~p points to ~p in pool ~p ~n", [Score, To, self()]),
+
+    {noreply, State};
+handle_cast(Request,_State) ->
+    {stop, {unknown_cast, Request}}.
 
 %%--------------------------------------------------------------------
 %% @private
