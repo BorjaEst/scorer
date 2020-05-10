@@ -8,7 +8,7 @@
 -behaviour(gen_event).
 
 %% API
--export([subscribe/1]).
+-export([subscribe/2]).
 
 %% gen_event callbacks
 -export([init/1, terminate/2, code_change/3]).
@@ -24,10 +24,10 @@
 %% @doc Adds an event handler
 %% @end
 %%--------------------------------------------------------------------
--spec(subscribe(To :: pid()) -> 
+-spec(subscribe(To :: scorer:group(), scorer:pool()) -> 
     ok | {'EXIT', Reason :: term()} | term()).
-subscribe(GenEvent) ->
-    gen_event:add_handler(GenEvent, ?MODULE, []).
+subscribe({_,GenEvent}, Pool) ->
+    gen_event:add_handler(GenEvent, ?MODULE, [Pool]).
 
 %%%===================================================================
 %%% gen_event callbacks
@@ -43,7 +43,7 @@ subscribe(GenEvent) ->
     {ok, State :: #state{}} |
     {ok, State :: #state{}, hibernate} |
     {error, Reason :: term()}).
-init([]) ->
+init([_Pool]) ->
     {ok, #state{}}.
 
 %%--------------------------------------------------------------------

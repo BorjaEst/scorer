@@ -34,7 +34,7 @@ new_group() -> scorer_sup:start_group().
 new_pool(Groups) -> 
     {ok, Pool} = scorer_sup:start_pool(),
     [ok = score_handler:subscribe(G, Pool) || G <- Groups],
-    Pool.
+    {ok, Pool}.
 
 
 % join_group(Group) -> The Pid joins a group so when scores, notifies the score servers

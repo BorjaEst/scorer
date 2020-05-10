@@ -133,22 +133,22 @@ my_test_case_example(_Config) ->
 % TESTS --------------------------------------------------------------
 
 % -------------------------------------------------------------------
-create_score_group() -> 
+create_score_group(_Config) -> 
     {ok, Group} = scorer:new_group(),
     Group.
 
 % -------------------------------------------------------------------
-create_single_pool() -> 
-    G1 = create_score_group(),
-    G2 = create_score_group(),
+create_single_pool(_Config) -> 
+    G1 = create_score_group(nill),
+    G2 = create_score_group(nill),
     {ok, Pool} = scorer:new_pool([G1, G2]),
     Pool.
 
 % -------------------------------------------------------------------
-create_combined_pools() -> 
-    G1 = create_score_group(),
-    G2 = create_score_group(),
-    G3 = create_score_group(),
+create_combined_pools(_Config) -> 
+    G1 = create_score_group(nill),
+    G2 = create_score_group(nill),
+    G3 = create_score_group(nill),
     {ok, P12} = scorer:new_pool([G1, G2]),
     {ok, P13} = scorer:new_pool([G1, G3]),
     {P12, P13}.
