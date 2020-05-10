@@ -53,6 +53,7 @@ end_per_suite(_Config) ->
 init_per_group(_GroupName, Config) ->
     Config.
 
+
 %%--------------------------------------------------------------------
 %% Function: end_per_group(GroupName, Config0) ->
 %%               term() | {save_config,Config1}
@@ -70,7 +71,13 @@ end_per_group(_GroupName, _Config) ->
 %% Reason = term()
 %%--------------------------------------------------------------------
 init_per_testcase(_GroupName, Config) ->
-    Config.
+    G_a  = single_group(),
+    G_b  = single_group(),
+    G_ab = single_group(),
+    P_a  = create_pool([G_a, G_ab]),
+    P_b  = create_pool([G_b, G_ab]),
+    [{g_a, G_a}, {g_b, G_b}, {g_ab, G_ab},
+     {p_a, P_a}, {p_b, P_b} | Config].
 
 %%--------------------------------------------------------------------
 %% Function: end_per_testcase(TestCase, Config0) ->
@@ -106,9 +113,8 @@ groups() ->
 %%--------------------------------------------------------------------
 all() ->
     [
-        create_score_group,
-        create_single_pool,
-        create_combined_pools
+        add_score_updates_score_in_simple_group,
+        add_score_updates_in_combined_group
     ].
 
 %%--------------------------------------------------------------------
@@ -133,42 +139,33 @@ my_test_case_example(_Config) ->
 % TESTS --------------------------------------------------------------
 
 % -------------------------------------------------------------------
-create_score_group(_Config) -> 
-    {ok, Group} = scorer:new_group(),
-    Group.
+add_score_updates_score_in_simple_group(Config) -> 
+    ok = scorer:join_group(?config(g_a, Config)),
+    ok = scorer:add_score(100.0),
+    true = 100.0 == scorer:get_score(?config(p_a, Config), self()).
+
 
 % -------------------------------------------------------------------
-create_single_pool(_Config) -> 
-    G1 = create_score_group(nill),
-    G2 = create_score_group(nill),
-    {ok, Pool} = scorer:new_pool([G1, G2]),
-    Pool.
-
-% -------------------------------------------------------------------
-create_combined_pools(_Config) -> 
-    G1 = create_score_group(nill),
-    G2 = create_score_group(nill),
-    G3 = create_score_group(nill),
-    {ok, P12} = scorer:new_pool([G1, G2]),
-    {ok, P13} = scorer:new_pool([G1, G3]),
-    {P12, P13}.
-
-% -------------------------------------------------------------------
-add_points_to_groups(_Config) -> 
-    {ok, G1} = scorer:new_group(),
-    {ok, G2} = scorer:new_group(),
-    {ok, G3} = scorer:new_group(),
-    {ok,  _} = scorer:new_pool([G1, G2]),
-    {ok,  _} = scorer:new_pool([G1, G3]),
-    scorer:add_score([G1, G2, G3], 100.0).
-
-
-
+add_score_updates_in_combined_group(Config) -> 
+    ok = scorer:join_group(?config(g_ab, Config)),
+    ok = scorer:add_score(100.0),
+    true = 100.0 == scorer:get_score(?config(p_a, Config), self()),
+    true = 100.0 == scorer:get_score(?config(p_b, Config), self()).
 
 % --------------------------------------------------------------------
 % SPECIFIC HELPER FUNCTIONS ------------------------------------------
 
-% Specific test function ---------------------------------------
+% Creates a single group --------------------------------------------
+single_group() -> 
+    {ok, Group} = scorer:new_group(),
+    ?INFO("Group: ", Group),
+    Group.
+
+% Greates a pool attached to the indicated groups -------------------
+create_pool(Groups) -> 
+    {ok, Pool} = scorer:new_pool(Groups),
+    ?INFO("{Pool, Groups}: ", {Pool, Groups}),
+    Pool.
 
 
 % --------------------------------------------------------------------
