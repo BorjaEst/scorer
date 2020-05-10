@@ -8,7 +8,7 @@
 -author("borja").
 
 %% API
--export([new_group/0, new_table/1]).
+-export([new_group/0, new_pool/1]).
 -export_types([]).
 
 -type group() :: term().
@@ -30,8 +30,8 @@ new_group() -> scorer_sup:start_group().
 %% @doc Creates a new score table suscribed to the defined groups.
 %% @end
 %%--------------------------------------------------------------------
--spec new_table([group()]) -> pool().
-new_table(Groups) -> 
+-spec new_pool([group()]) -> pool().
+new_pool(Groups) -> 
     {ok, Pool} = scorer_sup:start_pool(),
     [ok = score_handler:subscribe(G, Pool) || G <- Groups],
     Pool.
