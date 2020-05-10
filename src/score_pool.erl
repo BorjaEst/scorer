@@ -19,7 +19,9 @@
 -export([init/1, terminate/2, code_change/3]).
 -export([handle_call/3, handle_cast/2, handle_info/2]).
 
--record(state, {}).
+-record(state, {
+    table :: ets:tid()
+}).
 
 -define(TAB_CONFIGUTATION, [
     protected,    % Anyone can look but only the owner can write
@@ -33,18 +35,16 @@
 %%%===================================================================
 
 %%--------------------------------------------------------------------
-%% @doc
-%% Starts the server
-%%
+%% @doc Starts the server
 %% @end
 %%--------------------------------------------------------------------
--spec(start_link() ->
-    {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
+-spec start_link() ->
+    {ok, Pid :: pid()} | ignore | {error, Reason :: term()}.
 start_link() ->
-    gen_server:start_link(?MODULE, [], []).
-
-
-
+    case gen_server:start_link(?MODULE, [], []) of 
+        {ok, Pid} -> {ok, Pid, gen_server:call(Pid, tid)};
+        Other     -> Other
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc Returns the top N of an score pool in a format {Id, Score}.
@@ -117,7 +117,9 @@ to_list(Pool) -> lists:reverse(ets:tab2list(Pool)).
     {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
 init([]) ->
-    {ok, #state{}}.
+    {ok, #state{
+        table = ets:new(no_named, ?TAB_CONFIGUTATION)
+    }}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -134,8 +136,11 @@ init([]) ->
     {noreply, NewState :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
     {stop, Reason :: term(), NewState :: #state{}}).
-handle_call(_Request, _From, State) ->
-    {reply, ok, State}.
+
+handle_call(tid, _From, State) ->
+    {reply, State#state.table, State};
+handle_call(Request, _From, _State) ->
+    {stop, {unknown_call, Request}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -201,6 +206,8 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
+
+
 
 
 %%====================================================================

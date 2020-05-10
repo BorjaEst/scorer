@@ -65,8 +65,8 @@ stop_group({Id, _}) ->
 start_pool() ->
     Id = make_ref(),
     case supervisor:start_child(?SERVER, ?SPECS_SCORE_POOL(Id)) of 
-        {ok, Pid} -> {ok, {Id, Pid}};
-        Other     -> Other
+        {ok, Pid, Tid} -> {ok, {Id, Pid, Tid}};
+        Other          -> Other
     end.
 
 %%--------------------------------------------------------------------
