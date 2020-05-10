@@ -5,15 +5,13 @@
 %%% @end
 %%%-------------------------------------------------------------------
 -module(score_pool).
--compile([export_all, nowarn_export_all]). %% TODO: To delete after buil
-
 -behaviour(gen_server).
 
 %% API
--export([start_link/0]).
+-export([start_link/0, add_score/3, get_score/2]).
 -export_type([pool/0]).
 
--type pool() :: term().
+-type pool() :: {reference(), pid(), ets:tid()}.
 
 %% gen_server callbacks
 -export([init/1, terminate/2, code_change/3]).
@@ -51,11 +49,23 @@ start_link() ->
 %% @end
 %%--------------------------------------------------------------------
 -spec add_score(Pool, To, Points) -> ok when 
-    Pool   :: scorer:pool(),
+    Pool   :: pool(),
     To     :: pid(),
     Points :: float().
 add_score({_,ServerRef,_}, To, Points) ->
     gen_server:cast(ServerRef, {add_score, To, Points}).
+
+%%--------------------------------------------------------------------
+%% @doc Gets the score of an specific id.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_score(Pool, Of) -> Points when 
+    Pool   :: pool(),
+    Of     :: pid(),
+    Points :: float().
+get_score({_,_,Tid}, Of) ->
+    [{Of, Points}] = ets:lookup(Tid, Of),
+    Points.
 
 %%--------------------------------------------------------------------
 %% @doc Returns the top N of an score pool in a format {Id, Score}.
@@ -91,22 +101,6 @@ first_n(_Pool,     _ScoreAgent,_N)            -> [].
 -spec to_list(pool()) -> 
     [{Score :: float(), Agent_Id :: agent:id()}].
 to_list(Pool) -> lists:reverse(ets:tab2list(Pool)).
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 %%%===================================================================
@@ -165,10 +159,8 @@ handle_call(Request, _From, _State) ->
     {noreply, NewState :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: #state{}}).
 
-handle_cast({add_score, To, Score}, State) ->
-
-    io:format("Adding ~p points to ~p in pool ~p ~n", [Score, To, self()]),
-
+handle_cast({add_score, To, Points}, State) ->
+    do_add_score(State#state.table, To, Points),
     {noreply, State};
 handle_cast(Request,_State) ->
     {stop, {unknown_cast, Request}}.
@@ -224,7 +216,12 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-
+% Adds the specified points to the ref ------------------------------
+do_add_score(Tid, Id, Points) -> 
+    case ets:lookup(Tid, Id) of
+        [{Id, Score}] -> ets:insert(Tid, {Id, Score + Points});
+        []            -> ets:insert(Tid, {Id,         Points})
+    end.
 
 
 %%====================================================================

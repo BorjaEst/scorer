@@ -9,7 +9,7 @@
 
 %% API
 -export([new_group/0, new_pool/1, join/1]). 
--export([add_score/1, add_score/2]).
+-export([add_score/1, add_score/2, get_score/2]).
 -export_types([]).
 
 -type group() :: term().
@@ -58,6 +58,14 @@ add_score(Points) ->
 -spec add_score(group(), Points :: float()) -> ok.
 add_score(Group, Points) -> 
     score_handler:add_score(Group, Points). 
+
+%%--------------------------------------------------------------------
+%% @doc Creates a new score table suscribed to the defined groups.
+%% @end
+%%--------------------------------------------------------------------
+-spec get_score(pool(), Of :: pid()) -> Score :: float().
+get_score(Pool, Pid) -> 
+    score_pool:get_score(Pool, Pid).
 
 
 %%====================================================================

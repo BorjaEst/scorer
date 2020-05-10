@@ -9,7 +9,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 %% API
--export([start/0, join/1, subscribed/0]).
+-export([start/0, join/2, subscribed/1]).
 
 -define(TAB, score_groups).
 -define(TAB_CONFIGUTATION, [
@@ -18,7 +18,6 @@
     bag           % Subscribe should not need an update
 ]).
 -define(INIT_SCORE, 0.0).
-
 
 
 %%====================================================================
@@ -38,18 +37,18 @@ start() ->
 %% @doc Creates a new gen_event for a group which the new handlers.
 %% @end
 %%--------------------------------------------------------------------
--spec join(scorer:group()) -> ok.
-join(Group) -> 
-    true = ets:insert(?TAB, {self(), Group}),
+-spec join(scorer:group(), Who :: pid()) -> ok.
+join(Group, Who) -> 
+    true = ets:insert(?TAB, {Who, Group}),
     ok.
 
 %%--------------------------------------------------------------------
 %% @doc Creates a new gen_event for a group which the new handlers.
 %% @end
 %%--------------------------------------------------------------------
--spec subscribed() -> [scorer:group()].
-subscribed() -> 
-    [Group || {_,Group} <- ets:lookup(?TAB, self())].
+-spec subscribed(Who :: pid()) -> [scorer:group()].
+subscribed(Who) -> 
+    [Group || {_,Group} <- ets:lookup(?TAB, Who)].
 
 
 %%====================================================================
@@ -68,9 +67,9 @@ join_and_check_is_subscribed_test_() ->
       {setup, local, fun start_table/0, fun nothing/1,
        {inorder, [
            {"Call for joining group 'a'--------------------------", 
-            ?_assert(ok == join(a))},
+            ?_assert(ok == join(a, self()))},
            {"Check subscriptio to group 'a'----------------------",
-            ?_assert(lists:member(a, subscribed()))}
+            ?_assert(lists:member(a, subscribed(self())))}
        ]}}}.
 
 % -------------------------------------------------------------------
