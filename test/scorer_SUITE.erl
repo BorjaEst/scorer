@@ -140,16 +140,14 @@ my_test_case_example(_Config) ->
 
 % -------------------------------------------------------------------
 add_score_updates_score_in_simple_group(Config) -> 
-    ok = scorer:join(?config(g_a, Config)),
-    ok = scorer:add_score(100.0),
+    ok = scorer:add_score(?config(g_a, Config), self(), 100.0),
     timer:sleep(10),
     true = 100.0 == scorer:get_score(?config(p_a, Config), self()).
 
 
 % -------------------------------------------------------------------
 add_score_updates_in_combined_group(Config) -> 
-    ok = scorer:join(?config(g_ab, Config)),
-    ok = scorer:add_score(100.0),
+    ok = scorer:add_score(?config(g_ab, Config), self(), 100.0),
     timer:sleep(10),
     true = 100.0 == scorer:get_score(?config(p_a, Config), self()),
     true = 100.0 == scorer:get_score(?config(p_b, Config), self()).

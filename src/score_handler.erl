@@ -8,7 +8,10 @@
 -behaviour(gen_event).
 
 %% API
--export([subscribe/2, add_score/2]).
+-export([subscribe/2, add_score/3]).
+-export_type([group/0]).
+
+-type group() :: {reference(), pid()}.
 
 %% gen_event callbacks
 -export([init/1, terminate/2, code_change/3]).
@@ -35,9 +38,12 @@ subscribe({_,EventMgrRef}, Pool) ->
 %% @doc Adds a score in an specific group
 %% @end
 %%--------------------------------------------------------------------
--spec add_score(To :: scorer:group(), Points :: float()) -> ok.
-add_score({_,EventMgrRef}, Points) ->
-    gen_event:notify(EventMgrRef, {add_score, self(), Points}).
+-spec add_score(Group, Pid, Points) -> ok when 
+    Group  :: group(), 
+    Pid    :: pid(),
+    Points :: float().
+add_score({_,EventMgrRef}, Pid, Points) ->
+    gen_event:notify(EventMgrRef, {add_score, Pid, Points}).
 
 
 %%%===================================================================
