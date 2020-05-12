@@ -38,12 +38,12 @@ subscribe({_,EventMgrRef}, Pool) ->
 %% @doc Adds a score in an specific group
 %% @end
 %%--------------------------------------------------------------------
--spec add_score(Group, Pid, Points) -> ok when 
+-spec add_score(Group, Id, Points) -> ok when 
     Group  :: group(), 
-    Pid    :: pid(),
+    Id     :: term(),
     Points :: float().
-add_score({_,EventMgrRef}, Pid, Points) ->
-    gen_event:notify(EventMgrRef, {add_score, Pid, Points}).
+add_score({_,EventMgrRef}, Id, Points) ->
+    gen_event:notify(EventMgrRef, {add_score, Id, Points}).
 
 
 %%%===================================================================

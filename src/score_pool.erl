@@ -50,7 +50,7 @@ start_link() ->
 %%--------------------------------------------------------------------
 -spec add_score(Pool, To, Points) -> ok when 
     Pool   :: pool(),
-    To     :: pid(),
+    To     :: term(),
     Points :: float().
 add_score({_,ServerRef,_}, To, Points) ->
     gen_server:cast(ServerRef, {add_score, To, Points}).
