@@ -61,11 +61,13 @@ add_score({_,ServerRef,_}, To, Points) ->
 %%--------------------------------------------------------------------
 -spec get_score(Pool, Of) -> Points when 
     Pool   :: pool(),
-    Of     :: pid(),
+    Of     :: term(),
     Points :: float().
 get_score({_,_,Tid}, Of) ->
-    [{Of, Points}] = ets:lookup(Tid, Of),
-    Points.
+    case ets:lookup(Tid, Of) of 
+        [{Of, Points}] -> Points;
+        []             -> error({badarg, Of})
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc Returns the top N of an score pool in a format {Id, Score}.

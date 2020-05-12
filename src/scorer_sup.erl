@@ -47,7 +47,7 @@ start_link() ->
 start_group() ->
     Id = make_ref(),
     case supervisor:start_child(?SERVER, ?SPECS_SCORE_SERVER(Id)) of 
-        {ok, Pid} -> {ok, {Id, Pid}};
+        {ok, Pid} -> link(Pid), {ok, {Id, Pid}};
         Other     -> Other
     end.
 
@@ -55,7 +55,8 @@ start_group() ->
 %% @doc Starts a score server (group) under the supervisor. 
 %% @end
 %%--------------------------------------------------------------------
-stop_group({Id, _}) ->
+stop_group({Id, Pid}) ->
+    unlink(Pid),
     supervisor:terminate_child(?SERVER, Id).
 
 %%--------------------------------------------------------------------
@@ -65,7 +66,7 @@ stop_group({Id, _}) ->
 start_pool() ->
     Id = make_ref(),
     case supervisor:start_child(?SERVER, ?SPECS_SCORE_POOL(Id)) of 
-        {ok, Pid, Tid} -> {ok, {Id, Pid, Tid}};
+        {ok, Pid, Tid} -> link(Pid), {ok, {Id, Pid, Tid}};
         Other          -> Other
     end.
 
@@ -73,7 +74,8 @@ start_pool() ->
 %% @doc Starts a score server (group) under the supervisor. 
 %% @end
 %%--------------------------------------------------------------------
-stop_pool({Id, _}) ->
+stop_pool({Id, Pid, _}) ->
+    unlink(Pid),
     supervisor:terminate_child(?SERVER, Id).
 
 %%====================================================================

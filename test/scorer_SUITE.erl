@@ -52,7 +52,6 @@ end_per_suite(_Config) ->
 init_per_group(_GroupName, Config) ->
     Config.
 
-
 %%--------------------------------------------------------------------
 %% Function: end_per_group(GroupName, Config0) ->
 %%               term() | {save_config,Config1}
@@ -69,7 +68,7 @@ end_per_group(_GroupName, _Config) ->
 %% Config0 = Config1 = [tuple()]
 %% Reason = term()
 %%--------------------------------------------------------------------
-init_per_testcase(_GroupName, Config) ->
+init_per_testcase(_TestCase, Config) ->
     G_a  = single_group(),
     G_b  = single_group(),
     G_ab = single_group(),
@@ -85,7 +84,12 @@ init_per_testcase(_GroupName, Config) ->
 %% Config0 = Config1 = [tuple()]
 %% Reason = term()
 %%--------------------------------------------------------------------
-end_per_testcase(_TestCase, _Config) ->
+end_per_testcase(_TestCase, Config) ->
+    ok = delete_group(?config( g_a, Config)),
+    ok = delete_group(?config( g_b, Config)),
+    ok = delete_group(?config(g_ab, Config)),
+    ok = delete_pool(?config(p_a, Config)),
+    ok = delete_pool(?config(p_b, Config)), 
     ok.
 
 %%--------------------------------------------------------------------
@@ -113,7 +117,9 @@ groups() ->
 all() ->
     [
         add_score_updates_score_in_simple_group,
-        add_score_updates_in_combined_group
+        add_score_updates_in_combined_group,
+        remove_group_in_combined_group,
+        remove_pool_in_combined_group
     ].
 
 %%--------------------------------------------------------------------
@@ -151,6 +157,28 @@ add_score_updates_in_combined_group(Config) ->
     true = 100.0 == scorer:get_score(?config(p_a, Config), self()),
     true = 100.0 == scorer:get_score(?config(p_b, Config), self()).
 
+% -------------------------------------------------------------------
+remove_group_in_combined_group(Config) -> 
+    ok = scorer:remove_group(?config(g_ab, Config)),
+    timer:sleep(10),
+    ok = scorer:add_score(?config(g_a, Config), self(), 100.0),
+    try scorer:get_score(?config(p_a, Config), self()) of 
+          _                -> error(test_failed)
+    catch error:{badarg,_} -> ok
+    end.
+
+% -------------------------------------------------------------------
+remove_pool_in_combined_group(Config) -> 
+    ok = scorer:remove_pool(?config(p_a, Config)),
+    ok = scorer:add_score(?config(g_ab, Config), self(), 100.0),
+    timer:sleep(10),
+    true = 100.0 == scorer:get_score(?config(p_b, Config), self()),
+    try scorer:get_score(?config(p_a, Config), self()) of 
+          _            -> error(test_failed)
+    catch error:badarg -> ok
+    end.
+    
+
 % --------------------------------------------------------------------
 % SPECIFIC HELPER FUNCTIONS ------------------------------------------
 
@@ -165,6 +193,18 @@ create_pool(Groups) ->
     {ok, Pool} = scorer:new_pool(Groups),
     ?INFO("{Pool, Groups}: ", {Pool, Groups}),
     Pool.
+
+% Terminates a group ------------------------------------------------
+delete_group(Group) -> 
+    ok = scorer:remove_group(Group),
+    ?INFO("Removed group: ", Group),
+    ok.
+
+% Terminates a pool -------------------------------------------------
+delete_pool(Pool) -> 
+    ok = scorer:remove_pool(Pool),
+    ?INFO("Removed pool: ", Pool),
+    ok.
 
 
 % --------------------------------------------------------------------

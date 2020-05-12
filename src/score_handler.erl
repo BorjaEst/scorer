@@ -32,7 +32,7 @@
 -spec subscribe(To :: scorer:group(), scorer:pool()) -> 
     ok | {'EXIT', Reason :: term()} | term().
 subscribe({_,EventMgrRef}, Pool) ->
-    gen_event:add_handler(EventMgrRef, ?MODULE, [Pool]).
+    gen_event:add_sup_handler(EventMgrRef, ?MODULE, [Pool]).
 
 %%--------------------------------------------------------------------
 %% @doc Adds a score in an specific group

@@ -8,8 +8,8 @@
 -author("borja").
 
 %% API
--export([new_group/0, new_pool/1]). 
--export([add_score/3, get_score/2]).
+-export([new_group/0, remove_group/1]). 
+-export([new_pool/1, remove_pool/1, add_score/3, get_score/2]).
 -export_types([]).
 
 -type group() :: term().
@@ -21,11 +21,18 @@
 %%====================================================================
 
 %%--------------------------------------------------------------------
-%% @doc Creates a new gen_event for a group which the new handlers.
+%% @doc Creates a new gen_event for a group to run the new handlers.
 %% @end
 %%--------------------------------------------------------------------
 -spec new_group() -> {ok, group()} .
 new_group() -> scorer_sup:start_group().
+
+%%--------------------------------------------------------------------
+%% @doc Removes a group.
+%% @end
+%%--------------------------------------------------------------------
+-spec remove_group(group()) -> ok.
+remove_group(Group) -> scorer_sup:stop_group(Group).
 
 %%--------------------------------------------------------------------
 %% @doc Creates a new score table suscribed to the defined groups.
@@ -36,6 +43,13 @@ new_pool(Groups) ->
     {ok, Pool} = scorer_sup:start_pool(),
     [ok = score_handler:subscribe(G, Pool) || G <- Groups],
     {ok, Pool}.
+
+%%--------------------------------------------------------------------
+%% @doc Removes a pool.
+%% @end
+%%--------------------------------------------------------------------
+-spec remove_pool(pool()) -> ok.
+remove_pool(Pool) -> scorer_sup:stop_pool(Pool).
 
 %%--------------------------------------------------------------------
 %% @doc Add the points to the pid in a group.
