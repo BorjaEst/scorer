@@ -12,8 +12,8 @@
 -export([new_pool/1, remove_pool/1, add_score/3, get_score/2]).
 -export_types([]).
 
--type group() :: term().
--type pool()  :: term().
+-type group() :: {pid(), group}.
+-type pool()  :: {pid(), ets:tid(), pool}.
 
 
 %%====================================================================
@@ -25,14 +25,17 @@
 %% @end
 %%--------------------------------------------------------------------
 -spec new_group() -> {ok, group()} .
-new_group() -> scorer_sup:start_group().
+new_group() -> 
+    {ok, EventMgrRef} = gen_event:start_link(),
+    {ok, {EventMgrRef, group}}.
 
 %%--------------------------------------------------------------------
 %% @doc Removes a group.
 %% @end
 %%--------------------------------------------------------------------
--spec remove_group(group()) -> ok.
-remove_group(Group) -> scorer_sup:stop_group(Group).
+-spec remove_group(group()) -> true.
+remove_group({EventMgrRef, group}) -> 
+    exit(EventMgrRef, normal).
 
 %%--------------------------------------------------------------------
 %% @doc Creates a new score table suscribed to the defined groups.
@@ -40,32 +43,36 @@ remove_group(Group) -> scorer_sup:stop_group(Group).
 %%--------------------------------------------------------------------
 -spec new_pool([group()]) -> pool().
 new_pool(Groups) -> 
-    {ok, Pool} = scorer_sup:start_pool(),
-    [ok = score_handler:subscribe(G, Pool) || G <- Groups],
-    {ok, Pool}.
+    {ok, ServerRef, Tid} = score_pool:start_link(),
+    [ok = score_handler:subscribe(EventMgrRef, ServerRef) 
+        || {EventMgrRef,group} <- Groups],
+    {ok, {ServerRef, Tid, pool}}.
 
 %%--------------------------------------------------------------------
 %% @doc Removes a pool.
 %% @end
 %%--------------------------------------------------------------------
--spec remove_pool(pool()) -> ok.
-remove_pool(Pool) -> scorer_sup:stop_pool(Pool).
+-spec remove_pool(pool()) -> true.
+remove_pool({ServerRef, _Tid, pool}) -> 
+    unlink(ServerRef),  % Table not deleted if exit(SerRef, normal) 
+    exit(ServerRef, terminate). 
+    % exit(ServerRef, normal).
 
 %%--------------------------------------------------------------------
 %% @doc Add the points to the pid in a group.
 %% @end
 %%--------------------------------------------------------------------
--spec add_score(group(), Pid :: pid(), Points :: float()) -> ok.
-add_score(Group, Pid, Points) -> 
-    score_handler:add_score(Group, Pid, Points). 
+-spec add_score(group(), Id :: term(), Points :: float()) -> ok.
+add_score({EventMgrRef, group}, Id, Points) -> 
+    score_handler:add_score(EventMgrRef, Id, Points). 
 
 %%--------------------------------------------------------------------
 %% @doc Gets the pid score in a pool.
 %% @end
 %%--------------------------------------------------------------------
--spec get_score(pool(), Of :: pid()) -> Score :: float().
-get_score(Pool, Pid) -> 
-    score_pool:get_score(Pool, Pid).
+-spec get_score(pool(), Of :: term()) -> Score :: float().
+get_score({_ServerRef, Tid, pool}, Id) -> 
+    score_pool:get_score(Tid, Id).
 
 
 %%====================================================================

@@ -9,16 +9,13 @@
 
 %% API
 -export([subscribe/2, add_score/3]).
--export_type([group/0]).
-
--type group() :: {reference(), pid()}.
 
 %% gen_event callbacks
 -export([init/1, terminate/2, code_change/3]).
 -export([handle_event/2, handle_call/2, handle_info/2]).
 
 -record(state, {
-    pool :: scorer:pool()
+    pool :: pid()
 }).
 
 %%%===================================================================
@@ -29,20 +26,20 @@
 %% @doc Adds an event handler
 %% @end
 %%--------------------------------------------------------------------
--spec subscribe(To :: scorer:group(), scorer:pool()) -> 
+-spec subscribe(EventMgrRef :: pid(), pid()) -> 
     ok | {'EXIT', Reason :: term()} | term().
-subscribe({_,EventMgrRef}, Pool) ->
-    gen_event:add_sup_handler(EventMgrRef, ?MODULE, [Pool]).
+subscribe(EventMgrRef, Pid) ->
+    gen_event:add_sup_handler(EventMgrRef, ?MODULE, [Pid]).
 
 %%--------------------------------------------------------------------
 %% @doc Adds a score in an specific group
 %% @end
 %%--------------------------------------------------------------------
--spec add_score(Group, Id, Points) -> ok when 
-    Group  :: group(), 
-    Id     :: term(),
-    Points :: float().
-add_score({_,EventMgrRef}, Id, Points) ->
+-spec add_score(EventMgrRef, Id, Points) -> ok when 
+    EventMgrRef :: pid(), 
+    Id          :: term(),
+    Points      :: float().
+add_score(EventMgrRef, Id, Points) ->
     gen_event:notify(EventMgrRef, {add_score, Id, Points}).
 
 
@@ -60,8 +57,8 @@ add_score({_,EventMgrRef}, Id, Points) ->
     {ok, State :: #state{}} |
     {ok, State :: #state{}, hibernate} |
     {error, Reason :: term()}).
-init([Pool]) ->
-    {ok, #state{pool = Pool}}.
+init([Pid]) ->
+    {ok, #state{pool = Pid}}.
 
 %%--------------------------------------------------------------------
 %% @private

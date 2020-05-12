@@ -1,8 +1,7 @@
 {application, scorer,
- [{description, "An OTP application for score pools"},
+ [{description, "An OTP library for score pools"},
   {vsn, "0.1.0"},
-  {registered, [scorer_sup]},
-  {mod, {scorer_app, []}},
+  {registered, []},
   {applications,
    [kernel,
     stdlib

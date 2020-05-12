@@ -9,9 +9,6 @@
 
 %% API
 -export([start_link/0, add_score/3, get_score/2]).
--export_type([pool/0]).
-
--type pool() :: {reference(), pid(), ets:tid()}.
 
 %% gen_server callbacks
 -export([init/1, terminate/2, code_change/3]).
@@ -48,22 +45,22 @@ start_link() ->
 %% @doc Adds a score to an specific id.
 %% @end
 %%--------------------------------------------------------------------
--spec add_score(Pool, To, Points) -> ok when 
-    Pool   :: pool(),
-    To     :: term(),
-    Points :: float().
-add_score({_,ServerRef,_}, To, Points) ->
+-spec add_score(ServerRef, To, Points) -> ok when 
+    ServerRef :: pid(),
+    To        :: term(),
+    Points    :: float().
+add_score(ServerRef, To, Points) ->
     gen_server:cast(ServerRef, {add_score, To, Points}).
 
 %%--------------------------------------------------------------------
 %% @doc Gets the score of an specific id.
 %% @end
 %%--------------------------------------------------------------------
--spec get_score(Pool, Of) -> Points when 
-    Pool   :: pool(),
+-spec get_score(Tid, Of) -> Points when 
+    Tid    :: ets:tid(),
     Of     :: term(),
     Points :: float().
-get_score({_,_,Tid}, Of) ->
+get_score(Tid, Of) ->
     case ets:lookup(Tid, Of) of 
         [{Of, Points}] -> Points;
         []             -> error({badarg, Of})
@@ -73,8 +70,8 @@ get_score({_,_,Tid}, Of) ->
 %% @doc Returns the top N of an score pool in a format {Id, Score}.
 %% @end
 %%--------------------------------------------------------------------
--spec top(pool(), N :: integer()) -> 
-    [{Score :: float(), Agent_Id :: agent:id()}].
+% -spec top(pool(), N :: integer()) -> 
+%     [{Score :: float(), Agent_Id :: agent:id()}].
 top(Pool, N) -> last_n(Pool, ets:last(Pool), N).
 
 last_n(_Pool, '$end_of_table',_N)       -> [];
@@ -86,8 +83,8 @@ last_n(_Pool,     _ScoreAgent,_N)       -> [].
 %% @doc Returns the N agents with the lowest score.
 %% @end
 %%--------------------------------------------------------------------
--spec bottom(pool(), N :: integer()) -> 
-    [{Score :: float(), Agent_Id :: agent:id()}].
+% -spec bottom(pool(), N :: integer()) -> 
+%     [{Score :: float(), Agent_Id :: agent:id()}].
 bottom(Pool, N) -> first_n(Pool, ets:first(Pool), N).
 
 first_n(_Pool, '$end_of_table',_N)            -> [];
@@ -100,8 +97,8 @@ first_n(_Pool,     _ScoreAgent,_N)            -> [].
 %% @doc Returns the N agents with the lowest score.
 %% @end
 %%--------------------------------------------------------------------
--spec to_list(pool()) -> 
-    [{Score :: float(), Agent_Id :: agent:id()}].
+% -spec to_list(pool()) -> 
+%     [{Score :: float(), Agent_Id :: agent:id()}].
 to_list(Pool) -> lists:reverse(ets:tab2list(Pool)).
 
 

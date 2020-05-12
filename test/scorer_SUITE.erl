@@ -31,7 +31,6 @@ suite() ->
 %% Reason = term()
 %%--------------------------------------------------------------------
 init_per_suite(Config) ->
-    ok = application:start(scorer),
     Config.
 
 %%--------------------------------------------------------------------
@@ -39,7 +38,6 @@ init_per_suite(Config) ->
 %% Config0 = Config1 = [tuple()]
 %%--------------------------------------------------------------------
 end_per_suite(_Config) ->
-    ok = application:stop(scorer),
     ok.
 
 %%--------------------------------------------------------------------
@@ -119,7 +117,9 @@ all() ->
         add_score_updates_score_in_simple_group,
         add_score_updates_in_combined_group,
         remove_group_in_combined_group,
-        remove_pool_in_combined_group
+        remove_pool_in_combined_group,
+        group_is_automatically_removed_when_process_down,
+        pool_is_automatically_removed_when_process_down
     ].
 
 %%--------------------------------------------------------------------
@@ -149,7 +149,6 @@ add_score_updates_score_in_simple_group(Config) ->
     timer:sleep(10),
     true = 100.0 == scorer:get_score(?config(p_a, Config), self()).
 
-
 % -------------------------------------------------------------------
 add_score_updates_in_combined_group(Config) -> 
     ok = scorer:add_score(?config(g_ab, Config), self(), 100.0),
@@ -159,7 +158,7 @@ add_score_updates_in_combined_group(Config) ->
 
 % -------------------------------------------------------------------
 remove_group_in_combined_group(Config) -> 
-    ok = scorer:remove_group(?config(g_ab, Config)),
+    true = scorer:remove_group(?config(g_ab, Config)),
     timer:sleep(10),
     ok = scorer:add_score(?config(g_a, Config), self(), 100.0),
     try scorer:get_score(?config(p_a, Config), self()) of 
@@ -169,7 +168,7 @@ remove_group_in_combined_group(Config) ->
 
 % -------------------------------------------------------------------
 remove_pool_in_combined_group(Config) -> 
-    ok = scorer:remove_pool(?config(p_a, Config)),
+    true = scorer:remove_pool(?config(p_a, Config)),
     ok = scorer:add_score(?config(g_ab, Config), self(), 100.0),
     timer:sleep(10),
     true = 100.0 == scorer:get_score(?config(p_b, Config), self()),
@@ -177,7 +176,37 @@ remove_pool_in_combined_group(Config) ->
           _            -> error(test_failed)
     catch error:badarg -> ok
     end.
-    
+
+% -------------------------------------------------------------------
+group_is_automatically_removed_when_process_down(_Config) -> 
+    Parent = self(),
+    Fun = fun() -> Parent ! single_group(), receive _ -> ok end end,
+    Child = spawn(Fun),
+    Group = receive Msg -> Msg end,
+    Pool  = create_pool([Group]),
+    exit(Child, exception_raise),
+    timer:sleep(10),
+    ok = scorer:add_score(Group, self(), 100.0),
+    try scorer:get_score(Pool, self()) of 
+          _                -> error(test_failed)
+    catch error:{badarg,_} -> ok
+    end. 
+
+% -------------------------------------------------------------------
+pool_is_automatically_removed_when_process_down(_Config) -> 
+    Group  = single_group(),
+    Parent = self(),
+    Fun = fun() -> Parent ! create_pool([Group]), receive _ -> ok end end,
+    Child = spawn(Fun),
+    Pool = receive Msg -> Msg end,
+    exit(Child, exception_raise),
+    timer:sleep(10),
+    ok = scorer:add_score(Group, self(), 100.0),
+    try scorer:get_score(Pool, self()) of 
+          _            -> error(test_failed)
+    catch error:badarg -> ok
+    end. 
+
 
 % --------------------------------------------------------------------
 % SPECIFIC HELPER FUNCTIONS ------------------------------------------
@@ -196,13 +225,13 @@ create_pool(Groups) ->
 
 % Terminates a group ------------------------------------------------
 delete_group(Group) -> 
-    ok = scorer:remove_group(Group),
+    true = scorer:remove_group(Group),
     ?INFO("Removed group: ", Group),
     ok.
 
 % Terminates a pool -------------------------------------------------
 delete_pool(Pool) -> 
-    ok = scorer:remove_pool(Pool),
+    true = scorer:remove_pool(Pool),
     ?INFO("Removed pool: ", Pool),
     ok.
 
