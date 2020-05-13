@@ -8,19 +8,20 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/0, add_score/3, get_score/2]).
+-export([start_link/1, stop/1, add_score/3, get_score/2]).
+-export([top/2, bottom/2, to_list/1]).
 
 %% gen_server callbacks
 -export([init/1, terminate/2, code_change/3]).
 -export([handle_call/3, handle_cast/2, handle_info/2]).
 
 -record(state, {
-    table :: ets:tid()
+    table :: atom()
 }).
 
 -define(TAB_CONFIGUTATION, [
-    protected,    % Anyone can look but only the owner can write
-    ordered_set   % Ordered by score
+    {type, ordered_set},          % Ordered by score
+    {attributes, [score_id, id]}  % Table fields
 ]).
 -define(INIT_SCORE, 0.0).
 
@@ -33,13 +34,20 @@
 %% @doc Starts the server
 %% @end
 %%--------------------------------------------------------------------
--spec start_link() ->
+-spec start_link(Name :: atom()) ->
     {ok, Pid :: pid(), term()} | ignore | {error, Reason :: term()}.
-start_link() ->
-    case gen_server:start_link(?MODULE, [], []) of 
-        {ok, Pid} -> {ok, Pid, gen_server:call(Pid, tid)};
-        Other     -> Other
-    end.
+start_link(Name) when is_atom(Name) ->
+    gen_server:start_link(?MODULE, [Name], []);
+start_link(Name) ->
+    error({badtype, Name}).
+
+%%--------------------------------------------------------------------
+%% @doc Stops the server
+%% @end
+%%--------------------------------------------------------------------
+-spec stop(ServerRef :: pid()) -> ok.
+stop(ServerRef) ->
+    gen_server:stop(ServerRef).
 
 %%--------------------------------------------------------------------
 %% @doc Adds a score to an specific id.
@@ -56,50 +64,57 @@ add_score(ServerRef, To, Points) ->
 %% @doc Gets the score of an specific id.
 %% @end
 %%--------------------------------------------------------------------
--spec get_score(Tid, Of) -> Points when 
-    Tid    :: ets:tid(),
+-spec get_score(Tab, Of) -> Points when 
+    Tab    :: atom(),
     Of     :: term(),
     Points :: float().
-get_score(Tid, Of) ->
-    case ets:lookup(Tid, Of) of 
-        [{Of, Points}] -> Points;
-        []             -> error({badarg, Of})
+get_score(Tab, Of) ->
+    case mnesia:dirty_index_read(Tab, Of, id) of 
+        [{Tab, {Score, Of}, Of}] -> Score;
+        []                       -> error({badarg, Of})
     end.
 
 %%--------------------------------------------------------------------
-%% @doc Returns the top N of an score pool in a format {Id, Score}.
+%% @doc Returns the top N of an score pool in a format {Score, Id}.
+%% Ordered from highst to lowest.
 %% @end
 %%--------------------------------------------------------------------
-% -spec top(pool(), N :: integer()) -> 
-%     [{Score :: float(), Agent_Id :: agent:id()}].
-top(Pool, N) -> last_n(Pool, ets:last(Pool), N).
+-spec top(Tab :: atom(), N :: integer()) -> 
+    {atomic, [{Score :: float(), Id :: term()}]}.
+top(Tab, N) -> 
+    Top_Transaction = fun() -> last_n(Tab, mnesia:last(Tab), N) end,
+    mnesia:transaction(Top_Transaction).
 
-last_n(_Pool, '$end_of_table',_N)       -> [];
-last_n( Pool,      ScoreAgent, N) when N > 0 ->
-    [ScoreAgent|last_n(Pool, ets:prev(Pool,ScoreAgent), N-1)];
-last_n(_Pool,     _ScoreAgent,_N)       -> [].
+last_n(_Tab, '$end_of_table',_N) -> [];
+last_n( Tab, Key,  N) when N > 0 -> 
+    [Key|last_n(Tab, mnesia:prev(Tab,Key), N-1)];
+last_n(_Tabl,_Key,_N)            -> [].
 
 %%--------------------------------------------------------------------
-%% @doc Returns the N agents with the lowest score.
+%% @doc Returns the N with the lowest score in a format {Score, Id}.
+%% Ordered from lowest to highest.
 %% @end
 %%--------------------------------------------------------------------
-% -spec bottom(pool(), N :: integer()) -> 
-%     [{Score :: float(), Agent_Id :: agent:id()}].
-bottom(Pool, N) -> first_n(Pool, ets:first(Pool), N).
+-spec bottom(Tab ::atom(), N :: integer()) -> 
+    {atomic, [{Score :: float(), Id :: term()}]}.
+bottom(Tab, N) -> 
+    Bot_Transaction = fun() -> first_n(Tab, mnesia:first(Tab), N) end,
+    mnesia:transaction(Bot_Transaction).
 
-first_n(_Pool, '$end_of_table',_N)            -> [];
-first_n( Pool,      ScoreAgent, N) when N > 0 ->
-    [ScoreAgent|first_n(Pool,ets:next(Pool,ScoreAgent), N-1)];
-first_n(_Pool,     _ScoreAgent,_N)            -> [].
-
+first_n(_Tab, '$end_of_table',_N) -> [];
+first_n( Tab, Key, N) when N > 0 ->
+    [Key|first_n(Tab, mnesia:next(Tab,Key), N-1)];
+first_n(_Tab,_Key,_N)            -> [].
 
 %%--------------------------------------------------------------------
-%% @doc Returns the N agents with the lowest score.
-%% @end
+%% @doc Returns a list of all table elements in a format {Score, Id}.
+%% Ordered from lowest to highest.
+%% @endd
 %%--------------------------------------------------------------------
-% -spec to_list(pool()) -> 
-%     [{Score :: float(), Agent_Id :: agent:id()}].
-to_list(Pool) -> lists:reverse(ets:tab2list(Pool)).
+-spec to_list(Tab :: atom()) -> 
+    {atomic, [{Score :: float(), Id :: term()}]}.
+to_list(Tab) -> 
+    mnesia:transaction(fun() -> mnesia:all_keys(Tab) end).
 
 
 %%%===================================================================
@@ -120,10 +135,10 @@ to_list(Pool) -> lists:reverse(ets:tab2list(Pool)).
 -spec(init(Args :: term()) ->
     {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term()} | ignore).
-init([]) ->
-    {ok, #state{
-        table = ets:new(no_named, ?TAB_CONFIGUTATION)
-    }}.
+init([Name]) ->
+    {atomic, ok} = mnesia:create_table(Name, ?TAB_CONFIGUTATION),
+    {atomic, ok} = mnesia:add_table_index(Name, id), 
+    {ok, #state{table = Name}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -140,8 +155,7 @@ init([]) ->
     {noreply, NewState :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
     {stop, Reason :: term(), NewState :: #state{}}).
-
-handle_call(tid, _From, State) ->
+handle_call(table, _From, State) ->
     {reply, State#state.table, State};
 handle_call(Request, _From, _State) ->
     {stop, {unknown_call, Request}}.
@@ -157,9 +171,8 @@ handle_call(Request, _From, _State) ->
     {noreply, NewState :: #state{}} |
     {noreply, NewState :: #state{}, timeout() | hibernate} |
     {stop, Reason :: term(), NewState :: #state{}}).
-
 handle_cast({add_score, To, Points}, State) ->
-    do_add_score(State#state.table, To, Points),
+    do_add_points(State#state.table, To, Points),
     {noreply, State};
 handle_cast(Request,_State) ->
     {stop, {unknown_cast, Request}}.
@@ -216,10 +229,21 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 
 % Adds the specified points to the ref ------------------------------
-do_add_score(Tid, Id, Points) -> 
-    case ets:lookup(Tid, Id) of
-        [{Id, Score}] -> ets:insert(Tid, {Id, Score + Points});
-        []            -> ets:insert(Tid, {Id,         Points})
+do_add_points(Tab, Id, Points) -> 
+    case mnesia:dirty_index_read(Tab, Id, id) of 
+        [{Tab, {OldScore, Id}, Id}] -> 
+            NewScore = Points + OldScore,
+            Update = update_score(Tab, {OldScore, Id}, NewScore),
+            {atomic, ok} = mnesia:transaction(Update);
+        [] -> 
+            mnesia:dirty_write(Tab, {Tab, {Points, Id}, Id})
+    end.
+
+% Transaction: Update score -----------------------------------------
+update_score(Tab, {OldScore, Id}, NewScore) -> 
+    fun() -> 
+        ok = mnesia:delete({Tab, {OldScore, Id}}),
+        ok = mnesia:write({Tab, {NewScore, Id}, Id})
     end.
 
 
