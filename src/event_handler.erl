@@ -4,28 +4,23 @@
 %%%
 %%% @end
 %%%-------------------------------------------------------------------
--module(score_handler).
+-module(event_handler).
 -behaviour(gen_event).
 
 %% API
--export([create_table/2, add_score/3]).
+-export([subscribe/3]).
+-export([new_champion/3]).
 
 %% gen_event callbacks
 -export([init/1, terminate/2, code_change/3]).
 -export([handle_event/2, handle_call/2, handle_info/2]).
 
 -record(state, {
-    table :: atom(),
-    best  :: {Score :: float(), Id :: term()}
+    pool_id    :: scorer:pool(),
+    subscribed :: pid()
 }).
--define(TABLE, State#state.table).
--define( BEST, State#state.best ).
-
--define(TAB_CONFIGUTATION, [
-    {type, ordered_set},          % Ordered by score
-    {attributes, [score_id, id]}  % Table fields
-]).
--define(INIT_SCORE, 0.0).
+-define(   POOL_ID, State#state.pool_id   ).
+-define(SUBSCRIBED, State#state.subscribed).
 
 
 %%%===================================================================
@@ -36,21 +31,21 @@
 %% @doc Adds an event handler
 %% @end
 %%--------------------------------------------------------------------
--spec create_table(ScoreMgr :: pid(), Name :: atom()) -> 
+-spec subscribe(ScoreMgr :: pid(), Pool :: scorer:pool(), pid()) -> 
     ok | {'EXIT', Reason :: term()} | term().
-create_table(ScoreMgr, Name) ->
-    gen_event:add_handler(ScoreMgr, ?MODULE, [Name]).
+subscribe(ScoreMgr, Pool, Pid) ->
+    gen_event:add_sup_handler(ScoreMgr, ?MODULE, [Pool, Pid]).
 
 %%--------------------------------------------------------------------
-%% @doc Adds a score to an specific id.
+%% @doc Adds a score in an specific group
 %% @end
 %%--------------------------------------------------------------------
--spec add_score(ScoreMgr, Id, Points) -> ok when 
-    ScoreMgr :: pid(),
+-spec new_champion(ScoreMgr, Id, Points) -> ok when 
+    ScoreMgr :: pid(), 
     Id       :: term(),
     Points   :: float().
-add_score(ScoreMgr, Id, Points) ->
-    gen_event:notify(ScoreMgr, {add_score, Id, Points}).
+new_champion(ScoreMgr, Champion, Score) ->
+    gen_event:notify(ScoreMgr, {champion, Champion, Score}).
 
 
 %%%===================================================================
@@ -67,10 +62,8 @@ add_score(ScoreMgr, Id, Points) ->
     {ok, State :: #state{}} |
     {ok, State :: #state{}, hibernate} |
     {error, Reason :: term()}).
-init([Name]) ->
-    {atomic, ok} = mnesia:create_table(Name, ?TAB_CONFIGUTATION),
-    {atomic, ok} = mnesia:add_table_index(Name, id),
-    {ok, #state{table = Name}}.
+init([Pool, Pid]) ->
+    {ok, #state{pool_id = Pool, subscribed = Pid}}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -85,10 +78,9 @@ init([Name]) ->
     {swap_handler, Args1 :: term(), NewState :: #state{},
         Handler2 :: (atom() | {atom(), Id :: term()}), Args2 :: term()} |
     remove_handler).
-handle_event({add_score, Id, Points}, State) ->
-    Score = do_add_points(?TABLE, Id, Points),
-    Best  = get_best({Score, Id}, ?BEST),
-    {ok, State#state{best = Best}};
+handle_event({champion, Champion, Score}, State) ->
+    ?SUBSCRIBED ! {new_best, ?POOL_ID, {Champion, Score}},
+    {ok, State};
 handle_event(_Event, State) ->
     {ok, State}.
 
@@ -156,33 +148,6 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-
-% Adds the specified points to the ref ------------------------------
-do_add_points(Tab, Id, Points) -> 
-    case mnesia:dirty_index_read(Tab, Id, id) of 
-        [{Tab, {OldScore, Id}, Id}] -> 
-            NewScore = Points + OldScore,
-            Update = update_score(Tab, Id, OldScore, NewScore),
-            {atomic, ok} = mnesia:transaction(Update);
-        [] -> 
-            NewScore = Points,
-            mnesia:dirty_write({Tab, {NewScore, Id}, Id})
-    end,
-    NewScore.
-
-% Transaction: Update score -----------------------------------------
-update_score(Tab, Id, OldScore, NewScore) -> 
-    fun() -> 
-        ok = mnesia:delete({Tab, {OldScore, Id}}),
-        ok = mnesia:write({Tab, {NewScore, Id}, Id})
-    end.
-
-% Compares two scores and returns de best ---------------------------
-get_best(Applicant, Best) when Best >= Applicant -> Best;
-get_best(Applicant, Best) when Best <  Applicant -> 
-    {Score, Id} = Applicant,
-    event_handler:new_champion(self(), Id, Score),
-    Applicant.
 
 
 %%====================================================================

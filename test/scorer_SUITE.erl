@@ -117,7 +117,9 @@ groups() ->
             pool_is_automatically_down_when_process_down,
             get_top_3_from_highest_to_lowest_order,
             get_bottom_3_from_lowest_to_highest_order,
-            get_a_list_of_all_scores_from_lowest_to_highest_order
+            get_a_list_of_all_scores_from_lowest_to_highest_order,
+            subscription_to_pool_receives_event_messages,
+            parallel_scoring
           ]
         }
     ].
@@ -221,7 +223,7 @@ pool_is_automatically_down_when_process_down(_Config) ->
 
 % -------------------------------------------------------------------
 get_top_3_from_highest_to_lowest_order(Config) -> 
-    rand_score(?config(g_a, Config), 40),
+    [rand_score(?config(g_a, Config)) || _ <- lists:seq(1, 40)],
     timer:sleep(10),
     Top3 = scorer:top(?config(p_a, Config), 3),
     3 = length(Top3),
@@ -230,7 +232,7 @@ get_top_3_from_highest_to_lowest_order(Config) ->
 
 % -------------------------------------------------------------------
 get_bottom_3_from_lowest_to_highest_order(Config) -> 
-    rand_score(?config(g_a, Config), 40),
+    [rand_score(?config(g_a, Config)) || _ <- lists:seq(1, 40)],
     timer:sleep(10),
     Bottom3 = scorer:bottom(?config(p_a, Config), 3),
     3 = length(Bottom3),
@@ -239,11 +241,36 @@ get_bottom_3_from_lowest_to_highest_order(Config) ->
 
 % -------------------------------------------------------------------
 get_a_list_of_all_scores_from_lowest_to_highest_order(Config) -> 
-    rand_score(?config(g_a, Config), 40),
+    [rand_score(?config(g_a, Config)) || _ <- lists:seq(1, 40)],
     timer:sleep(10),
     List = scorer:to_list(?config(p_a, Config)),
     ?N_PARALLEL_IDS = length(List),
     check_order_lowest_to_higher(List),
+    ok.
+
+% -------------------------------------------------------------------
+subscription_to_pool_receives_event_messages(Config) -> 
+    Pool = ?config(p_a, Config),
+    scorer:subscribe(Pool),
+    scorer:add_score(?config(g_a, Config), a1, 1.0),
+    scorer:add_score(?config(g_a, Config), a2, 2.0),
+    scorer:add_score(?config(g_a, Config), a3, 1.0),
+    scorer:add_score(?config(g_a, Config), a4, 3.0),
+    scorer:add_score(?config(g_a, Config), a1, 1.0),
+    scorer:add_score(?config(g_a, Config), a2, 2.0),
+    timer:sleep(10),
+    [{new_best,Pool,{a1,1.0}},
+     {new_best,Pool,{a2,2.0}},
+     {new_best,Pool,{a4,3.0}},
+     {new_best,Pool,{a2,4.0}}] = read_inbox(),
+    ok.
+
+% -------------------------------------------------------------------
+parallel_scoring(Config) -> 
+    Score_In_A = fun() -> rand_score(?config(g_a, Config)) end,
+    Score_In_B = fun() -> rand_score(?config(g_a, Config)) end,
+    [spawn(Score_In_A) || _ <- lists:seq(1, 40)],
+    [spawn(Score_In_B) || _ <- lists:seq(1, 40)],
     ok.
 
 % --------------------------------------------------------------------
@@ -284,13 +311,19 @@ check_order_lowest_to_higher(List) ->
     ?INFO("Check ascendent order in: ", List),
     List = lists:sort(List).
 
-
 % Random scoring ----------------------------------------------------
-rand_score(Group, N) -> 
-    [ok = scorer:add_score(Group, rand:uniform(?N_PARALLEL_IDS), 1.0) 
-            || _ <- lists:seq(1, N)].
+rand_score(Group) -> 
+    Id = rand:uniform(?N_PARALLEL_IDS),
+    ?INFO("Scoring 1.0 points in {Group,For}: ", {Group,Id}),
+    ok = scorer:add_score(Group, Id, 1.0).
 
 
 % --------------------------------------------------------------------
 % RESULTS CONSOLE PRINT ----------------------------------------------
+
+% Reads all the messages in the inbox -------------------------------
+read_inbox() -> 
+    receive X -> [X|read_inbox()]
+    after   0 -> []
+    end.
 

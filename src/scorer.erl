@@ -10,7 +10,7 @@
 %% API
 -export([new_group/0, remove_group/1]). 
 -export([new_pool/2, remove_pool/1, add_score/3, get_score/2]).
--export([top/2, bottom/2, to_list/1]).
+-export([top/2, bottom/2, to_list/1, subscribe/1]).
 -export_types([]).
 
 -type group() :: {pid(), group}.
@@ -27,16 +27,16 @@
 %%--------------------------------------------------------------------
 -spec new_group() -> {ok, group()} .
 new_group() -> 
-    {ok, EventMgrRef} = gen_event:start_link(),
-    {ok, {EventMgrRef, group}}.
+    {ok, GroupMgr} = gen_event:start_link(),
+    {ok, {GroupMgr, group}}.
 
 %%--------------------------------------------------------------------
 %% @doc Removes a group.
 %% @end
 %%--------------------------------------------------------------------
 -spec remove_group(group()) -> ok.
-remove_group({EventMgrRef, group}) -> 
-    try gen_event:stop(EventMgrRef) of 
+remove_group({GroupMgr, group}) -> 
+    try gen_event:stop(GroupMgr) of 
           ok          -> ok
     catch exit:noproc -> ok
     end.
@@ -47,18 +47,18 @@ remove_group({EventMgrRef, group}) ->
 %%--------------------------------------------------------------------
 -spec new_pool(Name :: atom(), [group()]) -> pool().
 new_pool(Name, Groups) -> 
-    {ok, ServerRef} = score_pool:start_link(Name),
-    [ok = score_handler:subscribe(EventMgrRef, ServerRef) 
-        || {EventMgrRef,group} <- Groups],
-    {ok, {ServerRef, Name, pool}}.
+    {ok, ScoreMgr} = gen_event:start_link(),
+    ok = score_handler:create_table(ScoreMgr, Name),
+    [ok = group_handler:subscribe(X, ScoreMgr) || {X,group} <- Groups],
+    {ok, {ScoreMgr, Name, pool}}.
 
 %%--------------------------------------------------------------------
 %% @doc Removes a pool.
 %% @end
 %%--------------------------------------------------------------------
 -spec remove_pool(pool()) -> ok | {error, Reason :: term()}.
-remove_pool({ServerRef, Tab, pool}) -> 
-    try score_pool:stop(ServerRef) of 
+remove_pool({ScoreMgr, Tab, pool}) -> 
+    try gen_event:stop(ScoreMgr) of 
           ok          -> ok
     catch exit:noproc -> ok
     end,
@@ -73,16 +73,19 @@ remove_pool({ServerRef, Tab, pool}) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec add_score(group(), Id :: term(), Points :: float()) -> ok.
-add_score({EventMgrRef, group}, Id, Points) -> 
-    score_handler:add_score(EventMgrRef, Id, Points). 
+add_score({ScoreMgr, group}, Id, Points) -> 
+    group_handler:add_score(ScoreMgr, Id, Points). 
 
 %%--------------------------------------------------------------------
 %% @doc Gets the pid score in a pool.
 %% @end
 %%--------------------------------------------------------------------
 -spec get_score(pool(), Of :: term()) -> Score :: float().
-get_score({_ServerRef, Tab, pool}, Id) -> 
-    score_pool:get_score(Tab, Id).
+get_score({_ScoreMgr, Tab, pool}, Id) -> 
+    case mnesia:dirty_index_read(Tab, Id, id) of 
+        [{Tab, {Score, Id}, Id}] -> Score;
+        []                       -> error({badarg, Id})
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc Returns the top N of an score pool in a format {Score, Id}.
@@ -91,8 +94,9 @@ get_score({_ServerRef, Tab, pool}, Id) ->
 %%--------------------------------------------------------------------
 -spec top(Pool :: pool(), N :: integer()) -> 
     [{Score :: float(), Id :: term()}].
-top({_ServerRef, Tab, pool}, N) -> 
-    {atomic, TopN} = score_pool:top(Tab, N),
+top({_ScoreMgr, Tab, pool}, N) -> 
+    Top_Transaction = fun() -> last_n(Tab, mnesia:last(Tab), N) end,
+    {atomic, TopN} = mnesia:transaction(Top_Transaction),
     TopN.
 
 %%--------------------------------------------------------------------
@@ -102,8 +106,9 @@ top({_ServerRef, Tab, pool}, N) ->
 %%--------------------------------------------------------------------
 -spec bottom(Pool :: pool(), N :: integer()) -> 
     [{Score :: float(), Id :: term()}].
-bottom({_ServerRef, Tab, pool}, N) -> 
-    {atomic, BottomN} = score_pool:bottom(Tab, N),
+bottom({_ScoreMgr, Tab, pool}, N) -> 
+    Bot_Transaction = fun() -> first_n(Tab, mnesia:first(Tab), N) end,
+    {atomic, BottomN} = mnesia:transaction(Bot_Transaction),
     BottomN.
 
 %%--------------------------------------------------------------------
@@ -113,13 +118,37 @@ bottom({_ServerRef, Tab, pool}, N) ->
 %%--------------------------------------------------------------------
 -spec to_list(Pool :: pool()) -> 
     [{Score :: float(), Id :: term()}].
-to_list({_ServerRef, Tab, pool}) -> 
-    {atomic, List} = score_pool:to_list(Tab),
+to_list({_ScoreMgr, Tab, pool}) -> 
+    List_Transaction = fun() -> mnesia:all_keys(Tab) end,
+    {atomic, List} = mnesia:transaction(List_Transaction),
     List.
+
+%%--------------------------------------------------------------------
+%% @doc Subscribes to the pool events. The subscriber will receive the
+%% following messages in these contexts:
+%%   - {new_best, Pool, {Id, Score}} -> When new best score.
+%% @end
+%%--------------------------------------------------------------------
+-spec subscribe(Pool :: pool()) -> ok.
+subscribe({ScoreMgr, _Tab, pool} = Pool) -> 
+    event_handler:subscribe(ScoreMgr, Pool, self()).
+
 
 %%====================================================================
 %% Internal functions
 %%====================================================================
+
+% Reads the last n elements from a table ----------------------------
+last_n(_Tab, '$end_of_table',_N) -> [];
+last_n( Tab, Key,  N) when N > 0 -> 
+    [Key|last_n(Tab, mnesia:prev(Tab,Key), N-1)];
+last_n(_Tabl,_Key,_N)            -> [].
+
+% Reads the first n elements from a table ---------------------------
+first_n(_Tab, '$end_of_table',_N) -> [];
+first_n( Tab, Key, N) when N > 0 ->
+    [Key|first_n(Tab, mnesia:next(Tab,Key), N-1)];
+first_n(_Tab,_Key,_N)            -> [].
 
 
 %%====================================================================
