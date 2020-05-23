@@ -73,6 +73,7 @@ remove_pool({ScoreMgr, Tab, pool}) ->
 %% @end
 %%--------------------------------------------------------------------
 -spec add_score(group(), Id :: term(), Points :: float()) -> ok.
+add_score(_, _, 0.0) -> ok;
 add_score({ScoreMgr, group}, Id, Points) -> 
     group_handler:add_score(ScoreMgr, Id, Points). 
 
