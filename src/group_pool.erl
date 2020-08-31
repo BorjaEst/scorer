@@ -10,12 +10,12 @@
 -include_lib("kernel/include/logger.hrl").
 
 %% API
--export([start_link/0, tab/1, add/2, add_score/3, get_score/2, del/2]).
+-export([start_link/0, tab/1, add_score/2, get_score/2]).
 -export_types([]).
 
 -type score() :: float().
 -record(pr, {           % Table record with runing ids and scores
-    sr  :: {score(), term()}  % Score and process reference(id)
+    sr :: {score(), pid()}  % Score and pid
 }).
 
 %% gen_server callbacks
@@ -23,7 +23,7 @@
 -export([handle_call/3, handle_cast/2, handle_info/2]).
 
 -define(init_score, 0.0).
--define(tab_id(Id), {maps:get(Id, State, not_found), Id}).
+-define(tab_id(Pid), {maps:get(Pid, State, undefined), Pid}).
 -define(TAB_CONFIGUTATION, [
     public,           % Multiple agents have to register in it
     ordered_set,      % The pool must be a set (no repeated values)
@@ -54,22 +54,13 @@ tab(Server) ->
     gen_server:call(Server, tab).
 
 %%--------------------------------------------------------------------
-%% @doc Adds an agent-ref to a group pool.
-%% @end
-%%--------------------------------------------------------------------
--spec add(Server::pid(), Ref::term()) ->
-    ok | {error, Reason::term()}.
-add(Server, Ref) ->
-    gen_server:call(Server, {add, Ref}).
-
-%%--------------------------------------------------------------------
 %% @doc Adds a score to a registered id.
 %% @end
 %%--------------------------------------------------------------------
--spec add_score(Server::pid(), Ref::term(), Score::score()) -> 
+-spec add_score(Server::pid(), Score::score()) -> 
     ok.
-add_score(Server, Ref, Score) when is_float(Score) ->
-    gen_server:cast(Server, {add_score, Ref, Score}).
+add_score(Server, Score) when is_float(Score) ->
+    gen_server:cast(Server, {add_score, self(), Score}).
 
 %%--------------------------------------------------------------------
 %% @doc Returns the score of a registered id.
@@ -79,15 +70,6 @@ add_score(Server, Ref, Score) when is_float(Score) ->
     ok | {error, Reason::term()}.
 get_score(Server, Ref) ->
     gen_server:call(Server, {get_score, Ref}).
-
-%%--------------------------------------------------------------------
-%% @doc Removes an agent-ref from the group pool.
-%% @end
-%%--------------------------------------------------------------------
--spec del(Server::pid(), Ref::term()) -> 
-      ok | {error, Reason::term}.
-del(Server, Ref) ->
-    gen_server:call(Server, {del, Ref}).
 
 
 %%%===================================================================
@@ -124,20 +106,10 @@ init([]) ->
   {noreply, NewState :: #{}, timeout() | hibernate} |
   {stop, Reason :: term(), Reply :: term(), NewState :: #{}} |
   {stop, Reason :: term(), NewState :: #{}}).
-handle_call({add, Ref}, _From, State) ->
-    case add_to_pool({?init_score, Ref}) of 
-        {ok, Score} -> {reply, ok, State#{Ref=>Score}};
-        Error       -> {reply, {error, Error}, State}
-    end;
-handle_call({del, Ref}, _From, State) ->
-    case del_in_pool(?tab_id(Ref)) of 
-        ok    -> {reply, ok, maps:remove(Ref, State)};
-        Error -> {reply, {error, Error}, State}
-    end;
-handle_call({get_score, Ref}, _From, State) ->
-    case ?tab_id(Ref) of 
-        {Score, Ref} -> {reply, Score, State};
-        not_found    -> {reply, {error, not_found}, State}
+handle_call({get_score, Pid}, _From, State) ->
+    case ?tab_id(Pid) of 
+        {undefined, Pid} -> {reply, {error, not_found}, State};
+        {Score, Pid}     -> {reply, Score, State}
     end;
 handle_call(tab, _From, State) ->
     {reply, get(pool), State};
@@ -155,13 +127,9 @@ handle_call(Request, From, State) ->
   {noreply, NewState :: #{}} |
   {noreply, NewState :: #{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #{}}).
-handle_cast({add_score, Ref, Score}, State) ->
-    case score_in_pool(?tab_id(Ref), Score) of 
-        {ok, NewScore} -> {noreply, State#{Ref=>NewScore}};
-        not_found      -> ?LOG_NOTICE(#{what=>"Score request on non registered", 
-                                        id=>self(), details=>#{ref=>Ref}}),
-                          {noreply, State}
-    end;
+handle_cast({add_score, Pid, Score}, State) ->
+    {ok, NewScore} = score_in_pool(?tab_id(Pid), Score),
+    {noreply, State#{Pid=>NewScore}};
 handle_cast(Request, State) ->
     ?LOG_WARNING(#{what=>"Unexpected cast message", id=>self(), 
                    details=>#{request=>Request}}),
@@ -179,6 +147,11 @@ handle_cast(Request, State) ->
   {noreply, NewState :: #{}} |
   {noreply, NewState :: #{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #{}}).
+handle_info({'DOWN',Ref,process,Pid,_}, State) -> 
+    ?LOG_INFO(#{what=>"Monitored score pid DOWN", id=>self(), 
+                details=>#{ref=>Ref, pid=>Pid}}),
+    del_in_pool(?tab_id(Pid)),
+    {noreply, maps:remove(Pid, State)};
 handle_info({'ETS-TRANSFER', Tab, _, 'group_pool'}, State) -> 
     ?LOG_INFO(#{what=>"Tab transfer received", id=>self(), 
                 details=>#{tab=>Tab}}),
@@ -226,23 +199,28 @@ code_change(OldVsn, State, Extra) ->
 %%%===================================================================
 
 % Adds a pool record (pr) to the pool -------------------------------
-add_to_pool({Score, _}=SP) -> 
-    true = ets:insert(get(pool), #pr{sr=SP}),
+add_to_pool(Pid, Extra) -> 
+    Score = ?init_score + Extra,
+    true = ets:insert(get(pool), #pr{sr={Score,Pid}}),
     {ok, Score}.
 
 % Removes a pool record (pr) from the pool --------------------------
-del_in_pool(SP) ->
-    true = ets:delete(get(pool), SP),
+del_in_pool(Key) ->
+    true = ets:delete(get(pool), Key),
     ok.
 
+% Edits the pool record adding the extra score ----------------------
+edit_in_pool({_, Pid}=Key, NewScore) -> 
+    add_to_pool(Pid, NewScore),
+    del_in_pool(Key),
+    {ok, NewScore}.
+
 % Adds the score to a pool record (pr) in the pool ------------------
-score_in_pool({Score, Ref}=SP, Extra) -> 
-    case ets:lookup(get(pool), SP) of
-        []      -> not_found;
-        [#pr{}] -> NewScore = Score+Extra,
-                   add_to_pool({NewScore, Ref}),
-                   del_in_pool(SP),
-                   {ok, NewScore}
+score_in_pool(Key, Extra) -> 
+    case Key of
+        {undefined, Pid} -> erlang:monitor(process, Pid),
+                            add_to_pool(Pid, Extra);
+        {Score, _}       -> edit_in_pool(Key, Score+Extra)
     end.
 
 
@@ -282,29 +260,31 @@ pool_down({Server, _Tab}) ->
 
 % Adds a Ref to the group -------------------------------------------
 test_add({Server, Tab}) -> 
-    ?assertEqual(ok, add(Server, fake_pid(1))),
+    ?assertEqual(ok, gen_server:cast(Server, {add_score,fake_pid(1),0.0})),
     Id = {0.0, fake_pid(1)},
+    timer:sleep(10),
     ?assertMatch([#pr{sr=Id}], ets:lookup(Tab, Id)).
 
 % Adds a score to a Ref in the group --------------------------------
 test_add_score({Server, Tab}) ->
-    ok = add(Server, fake_pid(2)),
-    ?assertEqual(ok, add_score(Server, fake_pid(2), 100.0)),
+    ok = gen_server:cast(Server, {add_score,fake_pid(2),100.0}),
     Id = {100.0, fake_pid(2)},
     timer:sleep(10),
     ?assertMatch([#pr{sr=Id}], ets:lookup(Tab, Id)).
 
 % Gets the score of a Ref in the group ------------------------------
 test_get_score({Server, _Tab}) ->
-    ok = add(Server, fake_pid(4)),
-    ?assertEqual(ok, add_score(Server, fake_pid(4), 100.0)),
-    ?assertMatch(100.0, get_score(Server, fake_pid(4))).
+    ok = gen_server:cast(Server, {add_score,fake_pid(3),100.0}),
+    timer:sleep(10),
+    ?assertMatch(100.0, get_score(Server, fake_pid(3))).
 
 % Deletes a Ref from the group --------------------------------------
 test_del({Server, Tab}) -> 
-    ok = add(Server, fake_pid(3)),
-    ?assertEqual(ok, del(Server, fake_pid(3))),
-    ?assertMatch([], ets:lookup(Tab, {0.0, fake_pid(3)})).
+    Pid = spawn(fun() -> ok end),
+    ok = gen_server:cast(Server, {add_score,Pid,100.0}),
+    timer:sleep(10),
+    ?assertMatch({error, not_found}, get_score(Server, Pid)),
+    ?assertMatch([], ets:lookup(Tab, {100.0, Pid})).
 
 
 % --------------------------------------------------------------------

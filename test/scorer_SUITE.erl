@@ -159,7 +159,6 @@ my_test_case_example(_Config) ->
 
 % -------------------------------------------------------------------
 add_score_updates_score_in_simple_group(Config) -> 
-    scorer:join(?config(g_a, Config), self()),
     scorer:add_score(?config(g_a, Config), {self(), 100.0}),
     timer:sleep(10),
     true = 100.0 == scorer:get_score(?config(g_a, Config), self()),

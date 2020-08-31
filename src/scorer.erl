@@ -8,7 +8,7 @@
 -author("borja").
 
 %% API
--export([new_group/0, remove_group/1, join/2, leave/2]). 
+-export([new_group/0, remove_group/1]). 
 -export([new_pool/2, remove_pool/1, add_score/2, get_score/2]).
 -export([top/2, bottom/2, to_list/1, subscribe/1]).
 -export_types([score/0]).
@@ -78,32 +78,13 @@ remove_pool(#pool{}=P) ->
     end.
 
 %%--------------------------------------------------------------------
-%% @doc Add the Id to the specified groups.
-%% @end
-%%--------------------------------------------------------------------
--spec join(group(), Id) -> Id when Id::term().
-join(#group{}=G, Id) -> 
-    group_pool:add(G#group.srv, Id),
-    group_handler:add_score(G#group.mgr, Id, 0.0),
-    Id.
-
-%%--------------------------------------------------------------------
-%% @doc Add the Id to the specified group.
-%% @end
-%%--------------------------------------------------------------------
--spec leave(group(), Id) -> Id when Id::term().
-leave(#group{}=G, Id) -> 
-    group_pool:del(G#group.srv, Id),
-    Id.
-
-%%--------------------------------------------------------------------
 %% @doc Add the points to the pid in a group.
 %% @end
 %%--------------------------------------------------------------------
 -spec add_score(group(), {Id, score()}) -> Id when Id::term().
 add_score(         _, {Id,   0.0}) -> Id;
 add_score(#group{}=G, {Id, Score}) -> 
-    group_pool:add_score(G#group.srv, Id, Score),
+    group_pool:add_score(G#group.srv, Score),
     group_handler:add_score(G#group.mgr, Id, Score),
     Id. 
 
