@@ -159,22 +159,24 @@ my_test_case_example(_Config) ->
 
 % -------------------------------------------------------------------
 add_score_updates_score_in_simple_group(Config) -> 
-    ok = scorer:add_score(?config(g_a, Config), self(), 100.0),
+    scorer:join(?config(g_a, Config), self()),
+    scorer:add_score(?config(g_a, Config), {self(), 100.0}),
     timer:sleep(10),
+    true = 100.0 == scorer:get_score(?config(g_a, Config), self()),
     true = 100.0 == scorer:get_score(?config(p_a, Config), self()).
 
 % -------------------------------------------------------------------
 add_score_updates_in_combined_group(Config) -> 
-    ok = scorer:add_score(?config(g_ab, Config), self(), 100.0),
+    scorer:add_score(?config(g_ab, Config), {self(), 100.0}),
     timer:sleep(10),
     true = 100.0 == scorer:get_score(?config(p_a, Config), self()),
     true = 100.0 == scorer:get_score(?config(p_b, Config), self()).
 
 % -------------------------------------------------------------------
 remove_group_in_combined_group(Config) -> 
-    ok = scorer:remove_group(?config(g_ab, Config)),
+    scorer:remove_group(?config(g_ab, Config)),
     timer:sleep(10),
-    ok = scorer:add_score(?config(g_a, Config), self(), 100.0),
+    scorer:add_score(?config(g_a, Config), {self(), 100.0}),
     try scorer:get_score(?config(p_a, Config), self()) of 
           _                -> error(test_failed)
     catch error:{badarg,_} -> ok
@@ -182,8 +184,8 @@ remove_group_in_combined_group(Config) ->
 
 % -------------------------------------------------------------------
 remove_pool_in_combined_group(Config) -> 
-    ok = scorer:remove_pool(?config(p_a, Config)),
-    ok = scorer:add_score(?config(g_ab, Config), self(), 100.0),
+    scorer:remove_pool(?config(p_a, Config)),
+    scorer:add_score(?config(g_ab, Config), {self(), 100.0}),
     timer:sleep(10),
     true = 100.0 == scorer:get_score(?config(p_b, Config), self()),
     try scorer:get_score(?config(p_a, Config), self()) of 
@@ -200,7 +202,7 @@ group_is_automatically_down_when_process_down(_Config) ->
     Pool  = create_pool(test1, [Group]),
     exit(Child, exception_raise),
     timer:sleep(10),
-    ok = scorer:add_score(Group, self(), 100.0),
+    scorer:add_score(Group, {self(), 100.0}),
     try scorer:get_score(Pool, self()) of 
           _                -> error(test_failed)
     catch error:{badarg,_} -> ok
@@ -215,7 +217,7 @@ pool_is_automatically_down_when_process_down(_Config) ->
     Pool = receive Msg -> Msg end,
     exit(Child, exception_raise),
     timer:sleep(10),
-    ok = scorer:add_score(Group, self(), 100.0),
+    scorer:add_score(Group, {self(), 100.0}),
     try scorer:get_score(Pool, self()) of 
           _                -> error(test_failed)
     catch error:{badarg,_} -> ok
@@ -252,17 +254,19 @@ get_a_list_of_all_scores_from_lowest_to_highest_order(Config) ->
 subscription_to_pool_receives_event_messages(Config) -> 
     Pool = ?config(p_a, Config),
     scorer:subscribe(Pool),
-    scorer:add_score(?config(g_a, Config), a1, 1.0),
-    scorer:add_score(?config(g_a, Config), a2, 2.0),
-    scorer:add_score(?config(g_a, Config), a3, 1.0),
-    scorer:add_score(?config(g_a, Config), a4, 3.0),
-    scorer:add_score(?config(g_a, Config), a1, 1.0),
-    scorer:add_score(?config(g_a, Config), a2, 2.0),
+    scorer:add_score(?config(g_a, Config), {a1, 1.0}),
+    scorer:add_score(?config(g_a, Config), {a2, 2.0}),
+    scorer:add_score(?config(g_a, Config), {a3, 1.0}),
+    scorer:add_score(?config(g_a, Config), {a4, 3.0}),
+    scorer:add_score(?config(g_a, Config), {a1, 1.0}),
+    scorer:add_score(?config(g_a, Config), {a2, 2.0}),
     timer:sleep(10),
-    [{new_best,Pool,{a1,1.0}},
-     {new_best,Pool,{a2,2.0}},
-     {new_best,Pool,{a4,3.0}},
-     {new_best,Pool,{a2,4.0}}] = read_inbox(),
+    Inbox = read_inbox(),
+    ?INFO("Inbox: ", Inbox),
+    [{new_best,p_a,{a1,1.0}},
+     {new_best,p_a,{a2,2.0}},
+     {new_best,p_a,{a4,3.0}},
+     {new_best,p_a,{a2,4.0}}] = Inbox,
     ok.
 
 % -------------------------------------------------------------------
@@ -278,13 +282,13 @@ parallel_scoring(Config) ->
 
 % Creates a single group --------------------------------------------
 single_group() -> 
-    {ok, Group} = scorer:new_group(),
+    Group = scorer:new_group(),
     ?INFO("Group: ", Group),
     Group.
 
 % Greates a pool attached to the indicated groups -------------------
 create_pool(Name, Groups) -> 
-    {ok, Pool} = scorer:new_pool(Name, Groups),
+    Pool = scorer:new_pool(Name, Groups),
     ?INFO("{Pool, Groups}: ", {Pool, Groups}),
     Pool.
 
@@ -315,7 +319,7 @@ check_order_lowest_to_higher(List) ->
 rand_score(Group) -> 
     Id = rand:uniform(?N_PARALLEL_IDS),
     ?INFO("Scoring 1.0 points in {Group,For}: ", {Group,Id}),
-    ok = scorer:add_score(Group, Id, 1.0).
+    scorer:add_score(Group, {Id, 1.0}).
 
 
 % --------------------------------------------------------------------

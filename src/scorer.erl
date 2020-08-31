@@ -8,13 +8,16 @@
 -author("borja").
 
 %% API
--export([new_group/0, remove_group/1]). 
--export([new_pool/2, remove_pool/1, add_score/3, get_score/2]).
+-export([new_group/0, remove_group/1, join/2, leave/2]). 
+-export([new_pool/2, remove_pool/1, add_score/2, get_score/2]).
 -export([top/2, bottom/2, to_list/1, subscribe/1]).
--export_types([]).
+-export_types([score/0]).
 
--type group() :: {pid(), group}.
--type pool()  :: {pid(), atom(), pool}.
+-type score() :: float().
+-record(group, {sup::pid(), mgr::pid(), srv::pid(), tab::ets:tid()}).
+-type group() :: #group{}.
+-record(pool, {mgr::pid(), tab::atom()}).
+-type pool()  :: #pool{}.
 
 
 %%====================================================================
@@ -25,67 +28,99 @@
 %% @doc Creates a new gen_event for a group to run the new handlers.
 %% @end
 %%--------------------------------------------------------------------
--spec new_group() -> {ok, group()} .
+-spec new_group() -> group().
 new_group() -> 
-    {ok, GroupMgr} = gen_event:start_link(),
-    {ok, {GroupMgr, group}}.
+    case group_sup:start_link() of 
+        {ok, Supervisor} -> 
+            GroupMgr = group_sup:start_eventmng(Supervisor),
+            GroupSrv = group_sup:start_groupsrv(Supervisor),
+            GroupTab = group_pool:tab(GroupSrv),
+            #group{sup = Supervisor, mgr = GroupMgr, 
+                   srv = GroupSrv,   tab = GroupTab};
+        {error, Reason}  -> 
+            error(Reason)
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc Removes a group.
 %% @end
 %%--------------------------------------------------------------------
 -spec remove_group(group()) -> ok.
-remove_group({GroupMgr, group}) -> 
-    try gen_event:stop(GroupMgr) of 
-          ok          -> ok
-    catch exit:noproc -> ok
-    end.
+remove_group(#group{sup=Supervisor}) ->
+    exit(Supervisor, normal),
+    ok.
 
 %%--------------------------------------------------------------------
 %% @doc Creates a new score table suscribed to the defined groups.
 %% @end
 %%--------------------------------------------------------------------
--spec new_pool(Name :: atom(), [group()]) -> pool().
+-spec new_pool(Name::atom(), [group()]) -> pool().
 new_pool(Name, Groups) -> 
-    {ok, ScoreMgr} = gen_event:start_link(),
-    ok = score_handler:create_table(ScoreMgr, Name),
-    [ok = group_handler:subscribe(X, ScoreMgr) || {X,group} <- Groups],
-    {ok, {ScoreMgr, Name, pool}}.
+    {ok, PoolMgr} = gen_event:start_link(),
+    ok = score_handler:create_table(PoolMgr, Name),
+    [ok = group_handler:subscribe(G#group.mgr, PoolMgr) || G <- Groups],
+    #pool{mgr=PoolMgr, tab=Name}.
 
 %%--------------------------------------------------------------------
 %% @doc Removes a pool.
 %% @end
 %%--------------------------------------------------------------------
--spec remove_pool(pool()) -> ok | {error, Reason :: term()}.
-remove_pool({ScoreMgr, Tab, pool}) -> 
-    try gen_event:stop(ScoreMgr) of 
+-spec remove_pool(pool()) -> ok | {error, Reason::term()}.
+remove_pool(#pool{}=P) -> 
+    try gen_event:stop(P#pool.mgr) of 
           ok          -> ok
     catch exit:noproc -> ok
     end,
-    case mnesia:delete_table(Tab) of 
+    case mnesia:delete_table(P#pool.tab) of 
         {atomic, ok}            -> ok;
         {aborted,{no_exists,_}} -> ok;
         {aborted, Reason}       -> {error, Reason}
     end.
 
 %%--------------------------------------------------------------------
+%% @doc Add the Id to the specified groups.
+%% @end
+%%--------------------------------------------------------------------
+-spec join(group(), Id) -> Id when Id::term().
+join(#group{}=G, Id) -> 
+    group_pool:add(G#group.srv, Id),
+    group_handler:add_score(G#group.mgr, Id, 0.0),
+    Id.
+
+%%--------------------------------------------------------------------
+%% @doc Add the Id to the specified group.
+%% @end
+%%--------------------------------------------------------------------
+-spec leave(group(), Id) -> Id when Id::term().
+leave(#group{}=G, Id) -> 
+    group_pool:del(G#group.srv, Id),
+    Id.
+
+%%--------------------------------------------------------------------
 %% @doc Add the points to the pid in a group.
 %% @end
 %%--------------------------------------------------------------------
--spec add_score(group(), Id :: term(), Points :: float()) -> ok.
-add_score(_, _, 0.0) -> ok;
-add_score({ScoreMgr, group}, Id, Points) -> 
-    group_handler:add_score(ScoreMgr, Id, Points). 
+-spec add_score(group(), {Id, score()}) -> Id when Id::term().
+add_score(         _, {Id,   0.0}) -> Id;
+add_score(#group{}=G, {Id, Score}) -> 
+    group_pool:add_score(G#group.srv, Id, Score),
+    group_handler:add_score(G#group.mgr, Id, Score),
+    Id. 
 
 %%--------------------------------------------------------------------
 %% @doc Gets the pid score in a pool.
 %% @end
 %%--------------------------------------------------------------------
--spec get_score(pool(), Of :: term()) -> Score :: float().
-get_score({_ScoreMgr, Tab, pool}, Id) -> 
-    case mnesia:dirty_index_read(Tab, Id, id) of 
-        [{Tab, {Score, Id}, Id}] -> Score;
-        []                       -> error({badarg, Id})
+-spec get_score(group()|pool(), Id) -> Id when Id::term().
+get_score(#group{}=G, Id) -> 
+    case group_pool:get_score(G#group.srv, Id) of
+        Score when is_float(Score) -> Score;
+        {error, not_found}         -> error({badarg, Id})
+    end;
+get_score(#pool{}=P, Id) -> 
+    case mnesia:dirty_index_read(P#pool.tab, Id, id) of 
+        [{_, {Score, Id}, Id}] -> Score;
+        []                     -> error({badarg, Id})
     end.
 
 %%--------------------------------------------------------------------
@@ -93,11 +128,12 @@ get_score({_ScoreMgr, Tab, pool}, Id) ->
 %% Ordered from highst to lowest.
 %% @end
 %%--------------------------------------------------------------------
--spec top(Pool :: pool(), N :: integer()) -> 
-    [{Score :: float(), Id :: term()}].
-top({_ScoreMgr, Tab, pool}, N) -> 
-    Top_Transaction = fun() -> last_n(Tab, mnesia:last(Tab), N) end,
-    {atomic, TopN} = mnesia:transaction(Top_Transaction),
+-spec top(group()|pool(), N::integer()) -> [{score(),Id::term()}].
+top(#group{}=G, N) -> 
+    last_n(ets, G#group.tab, N);
+top( #pool{}=P, N) -> 
+    Transaction = fun() -> last_n(mnesia, P#pool.tab, N) end,
+    {atomic, TopN} = mnesia:transaction(Transaction),
     TopN.
 
 %%--------------------------------------------------------------------
@@ -105,11 +141,12 @@ top({_ScoreMgr, Tab, pool}, N) ->
 %% Ordered from lowest to highest.
 %% @end
 %%--------------------------------------------------------------------
--spec bottom(Pool :: pool(), N :: integer()) -> 
-    [{Score :: float(), Id :: term()}].
-bottom({_ScoreMgr, Tab, pool}, N) -> 
-    Bot_Transaction = fun() -> first_n(Tab, mnesia:first(Tab), N) end,
-    {atomic, BottomN} = mnesia:transaction(Bot_Transaction),
+-spec bottom(group()|pool(), N::integer()) -> [{score(),Id::term()}].
+bottom(#group{}=G, N) -> 
+    first_n(ets, G#group.tab, N);
+bottom( #pool{}=P, N) -> 
+    Transaction = fun() -> first_n(mnesia, P#pool.tab, N) end,
+    {atomic, BottomN} = mnesia:transaction(Transaction),
     BottomN.
 
 %%--------------------------------------------------------------------
@@ -117,10 +154,11 @@ bottom({_ScoreMgr, Tab, pool}, N) ->
 %% Ordered from lowest to highest.
 %% @end
 %%--------------------------------------------------------------------
--spec to_list(Pool :: pool()) -> 
-    [{Score :: float(), Id :: term()}].
-to_list({_ScoreMgr, Tab, pool}) -> 
-    List_Transaction = fun() -> mnesia:all_keys(Tab) end,
+-spec to_list(group()|pool()) -> [{score(),Id::term()}].
+to_list(#group{}=G) -> 
+    ets:tab2list(G#group.tab);
+to_list( #pool{}=P) -> 
+    List_Transaction = fun() -> mnesia:all_keys(P#pool.tab) end,
     {atomic, List} = mnesia:transaction(List_Transaction),
     List.
 
@@ -130,9 +168,9 @@ to_list({_ScoreMgr, Tab, pool}) ->
 %%   - {new_best, Pool, {Id, Score}} -> When new best score.
 %% @end
 %%--------------------------------------------------------------------
--spec subscribe(Pool :: pool()) -> ok.
-subscribe({ScoreMgr, _Tab, pool} = Pool) -> 
-    event_handler:subscribe(ScoreMgr, Pool, self()).
+-spec subscribe(pool()) -> ok.
+subscribe(#pool{}=P) -> 
+    event_handler:subscribe(P#pool.mgr, P#pool.tab, self()).
 
 
 %%====================================================================
@@ -140,16 +178,17 @@ subscribe({ScoreMgr, _Tab, pool} = Pool) ->
 %%====================================================================
 
 % Reads the last n elements from a table ----------------------------
-last_n(_Tab, '$end_of_table',_N) -> [];
-last_n( Tab, Key,  N) when N > 0 -> 
-    [Key|last_n(Tab, mnesia:prev(Tab,Key), N-1)];
-last_n(_Tabl,_Key,_N)            -> [].
+first_n(mnesia, Tab, N) -> get_n(Tab, mnesia:first(Tab), N, fun mnesia:next/2); 
+first_n(   ets, Tab, N) -> get_n(Tab,    ets:first(Tab), N, fun    ets:next/2).
 
-% Reads the first n elements from a table ---------------------------
-first_n(_Tab, '$end_of_table',_N) -> [];
-first_n( Tab, Key, N) when N > 0 ->
-    [Key|first_n(Tab, mnesia:next(Tab,Key), N-1)];
-first_n(_Tab,_Key,_N)            -> [].
+% Reads the last n elements from a table ----------------------------
+last_n(mnesia, Tab, N) -> get_n(Tab, mnesia:last(Tab), N, fun mnesia:prev/2); 
+last_n(   ets, Tab, N) -> get_n(Tab,    ets:last(Tab), N, fun    ets:prev/2).
+
+% Goes over ETS/Mnesia table using the function F -------------------
+get_n(_T, K,_N,_F) when K=='$end_of_table' -> [];
+get_n( T, K, N, F) when N > 0              -> [K|get_n(T,F(T,K),N-1, F)];
+get_n(_T,_K,_N,_F)                         -> [].
 
 
 %%====================================================================

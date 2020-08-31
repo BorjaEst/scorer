@@ -16,7 +16,7 @@
 -export([handle_event/2, handle_call/2, handle_info/2]).
 
 -record(state, {
-    pool_id    :: scorer:pool(),
+    pool_id    :: atom(),
     subscribed :: pid()
 }).
 -define(   POOL_ID, State#state.pool_id   ).
@@ -31,10 +31,10 @@
 %% @doc Adds an event handler
 %% @end
 %%--------------------------------------------------------------------
--spec subscribe(ScoreMgr :: pid(), Pool :: scorer:pool(), pid()) -> 
+-spec subscribe(ScoreMgr :: pid(), Pool_name::atom(), pid()) -> 
     ok | {'EXIT', Reason :: term()} | term().
-subscribe(ScoreMgr, Pool, Pid) ->
-    gen_event:add_sup_handler(ScoreMgr, ?MODULE, [Pool, Pid]).
+subscribe(ScoreMgr, Pool_name, Pid) ->
+    gen_event:add_sup_handler(ScoreMgr, ?MODULE, [Pool_name, Pid]).
 
 %%--------------------------------------------------------------------
 %% @doc Adds a score in an specific group
